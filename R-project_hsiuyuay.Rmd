@@ -1,0 +1,536 @@
+---
+title: "Project"
+author: "Hsiu Yuan Yang"
+date: "Fall 2022"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: paper
+    highlight: tango
+editor_options: 
+  chunk_output_type: inline
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+## US Storm / Disaster Analysis 
+
+Weather data is closely related to our lives. People would check on the current temperature and the raining probability when they go out, and they would monitor the latest storm / atmospheric event information in order to get prepared. 
+
+While I come from a country which has a lot of weather disasters, I was curious about what the natural disasters in US are like. I would like to know more about the disaster types, the occurring patterns (if any), etc. Hence, I decided to choose this topic as my R project.
+
+The data sets used in this project are from the Storm Events Database owned by National Centers for Environmental Information - National Oceanic and Atmospheric Administration (NOAA). I will be using several data sets from NOAA, i.e. the storm / event details data sets for 2010 to 2022. The datasets are downloaded from https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/, and detailed documentation about the fields / columns can be found on https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/Storm-Data-Bulk-csv-Format.pdf.
+
+The NOAA data sets are categorized by year, i.e. each csv file downloaded from its website is only for a specific year. While I planned to use the data set for a whole year cycle, it is noted that the data for the current 2022 cycle is not yet complete (with data only up to June), therefore I have manually created a data set to filter out information from July 2021 to June 2022. Besides, since I would like to compare if there are differences between the past (choosing 10 years before as a target) and the present, I also manually created a data set to filter out information from July 2011 to June 2012. In addition, to do future time series predictions, I also manually consolidated the storm / event data from January 2010 to the latest June 2022. 
+
+In short, 3 sets of data are in use for this project:
+
+1. Storm / event details for the current cycle (i.e. Jul 2021 to Jun 2022)  
+2. Storm / event details for the past cycle (i.e. Jul 2011 to Jun 2012)  
+3. Storm / event details consolidated (i.e. Jan 2010 to Jun 2022)
+
+Below outlines the details of the storm / event data sets (using the current cycle (i.e. Jul 2021 to Jun 2022) as an example):
+
+```{r read in data sets}
+# data set for storm / event details of the current cycle (i.e. Jul 2021 to Jun 2022) 
+storm.current.raw <- read.csv("C:/Users/Yang Hsiu Yuan/Desktop/CMU/2022 Fall semester/94842 Programming R for Analytics/Project/StormEvents_details_current.csv", stringsAsFactors=TRUE)
+
+# data set for storm / event details of the past cycle (i.e. Jul 2011 to Jun 2012)
+storm.past.raw <- read.csv("C:/Users/Yang Hsiu Yuan/Desktop/CMU/2022 Fall semester/94842 Programming R for Analytics/Project/StormEvents_details_previous.csv", stringsAsFactors=TRUE)
+
+# data set for storm / event details consolidated (i.e. Jan 2010 to Jun 2022)
+storm.consolidated.raw <- read.csv("C:/Users/Yang Hsiu Yuan/Desktop/CMU/2022 Fall semester/94842 Programming R for Analytics/Project/StormEvents_details_consolidated.csv", stringsAsFactors=TRUE)
+
+# illustrate data set (using the current cycle one as an example)
+colnames(storm.current.raw)
+str(storm.current.raw)
+```
+
+The data types covered in this set include some dates, event description such as event type, event location, and some event characteristics such as numbers of injuries and deaths.
+
+## Analysis Preparation and Potential Questions in Mind
+
+To start with, considering the data sets used are rather large, and I would only like to focus on the storm / disaster details, I removed the columns that have a majority of NA values and only kept those that I would like to conduct my analysis on.   
+
+```{r get subset of data}
+# create subset for the current cycle
+storm.current <- subset(storm.current.raw, select = -c(EPISODE_ID, SOURCE, CATEGORY, TOR_OTHER_WFO:DATA_SOURCE))
+storm.current <- storm.current[order(storm.current$BEGIN_YEARMONTH),]
+
+# create subset for the past cycle
+storm.past <- subset(storm.past.raw, select = -c(EPISODE_ID, SOURCE, CATEGORY, TOR_OTHER_WFO:DATA_SOURCE))
+storm.past <- storm.past[order(storm.past$BEGIN_YEARMONTH),]
+
+# create subset for the consolidated set
+storm.consolidated <- subset(storm.consolidated.raw, select = -c(EPISODE_ID, SOURCE, CATEGORY, TOR_OTHER_WFO:DATA_SOURCE))
+storm.consolidated <- storm.consolidated[order(storm.consolidated$BEGIN_YEARMONTH),]
+
+# print out the updated column names for the current cycle as an example, the column names are the same for all 3 datasets
+colnames(storm.current)
+summary(storm.current)
+head(storm.current)
+```
+
+Before starting the analysis, install the libraries / packages that will be used. 
+
+```{r install libaries, eval = FALSE}
+# install libraries 
+install.packages("tidyverse")
+install.packages("plyr")
+install.packages("usmap")
+install.packages("caret")
+```
+
+Below is a list of questions I would like to examine throughout this project:     
+
+I.Exploratory Data Analysis for the Current Cycle:
+
+  * Which type(s) of event occur the most often?  
+  * Is there a specific month / season when more events happen? Throughout the year, how does the event occurrence fluctuate through time?   
+  * Which state(s) have potentially more events compared to other states?   
+  * For the states that occur more events than others, what are the most frequent events?  
+  * Were there high injuries and deaths for the events?  
+  * Is there a relationship between the length and the width of tornadoes?  
+
+  
+  
+II.Comparison of the Current Cycle and the Past Cycle:  
+
+  * Are the top 5 events that occur the most in the current cycle same as these in the past?  
+  * Are there any differences of the time fluctuation of event occurrence?  
+  * Has the wind speed changed throughout the years?   
+  * Has the hail size changed throughout the years?   
+  
+
+  
+III.Prediction using Long Term Time Series Data:
+
+  * Can we predict the tornado width with tornado length for the next 20 tornadoes using previous collected data?  
+  
+ 
+  
+## I. Exploratory Data Analysis for the Current Cycle
+
+
+##### Q1a: Which type(s) of event occur the most often?
+
+Before starting the analysis, understand what the potential types / option for event type are.Relevant libraries should also be loaded.
+
+```{r inspect event type}
+unique(storm.current$EVENT_TYPE)
+library(plyr)
+library(tidyverse)
+```
+
+A barplot is illustrated below to examine the occurrence of each event type.
+
+```{r bar plot of event occurrence per type}
+# plot number of events occurred per type
+event.plot <- ggplot(data = storm.current, aes(x = fct_infreq(EVENT_TYPE)))
+event.plot + geom_bar(fill = 'lightblue') + xlab("Event Type") + ylab("Count") + ggtitle("Summary of Event Occurrence per Type (Current)") + theme(text = element_text(size=8),
+        axis.text.x = element_text(angle=45, hjust=1), plot.title = element_text(hjust = 0.5)) 
+
+# a closer look on the top 5 event types
+table(storm.current$EVENT_TYPE)
+
+# the top 5 most occurred events are Thunderstorm Wind, Hail, High Wind, Drought, Flash Flood
+top5event <- c('Thunderstorm Wind', 'Hail', 'High Wind', 'Drought', 'Flash Flood')
+
+top5event.plot <- ggplot(data = storm.current[storm.current$EVENT_TYPE %in% top5event,], aes(x = fct_infreq(EVENT_TYPE)))
+top5event.plot + geom_bar(fill = 'coral') + ylab("Count") + xlab("Event Type") + ggtitle("Top 5 Most Occurred Event") + theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=0), plot.title = element_text(hjust = 0.5))
+```
+
+From the barplot above, it is noted that during the current cycle, thunderstorm wind occurs the most often, following by hail, high wind, drought, and flash flood. It is also noted that thunderstorm wind occurs more than twice of the number of hails.  
+
+
+##### Q1b: Is there a specific month / season when more events happen? Throughout the year, how does the event occurrence fluctuate through time?   
+
+A barplot is illustrated below to examine the occurrence of events throughout the year.
+
+```{r bar plot of event occurrence throughout the current cycle}
+# plot of event occurrence throughout the current cycle
+month.order <- c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June')
+month.labels <- c('Jul 2021', 'Aug 2021', ' Sep 2021', 'Oct 2021', 'Nov 2021', 'Dec 2021', 'Jan 2022', 'Feb 2022', 'Mar 2022', 'Apr 2022', 'May 2022', 'Jun 2022')
+month.plot <- ggplot(data = storm.current, aes(x = MONTH_NAME))
+month.plot + geom_bar(fill = 'orange') + xlab("Month") + ylab("Count") + ggtitle("Event Occurrence Throughout the Current Cycle") + theme(text = element_text(size=10), axis.text.x = element_text(angle=45, hjust=1), plot.title = element_text(hjust = 0.5)) + scale_x_discrete(limits = month.order, labels = month.labels)
+```
+
+From the barplot above, it is noted that throughout the current cycle, it is more likely to have more events during summer. For the current cycle, June 2022 has occurred the most events, and November 2021 has occurred the least events. 
+
+Let's also view the differences between each season. Following meteorological seasons, divide the months into the seasons as the following:
+
+* Spring: March, April, May
+* Summer: June, July, August
+* Fall: September, October, November
+* Winter: December, January, February
+
+A barplot is illustrated below to examine the occurrence of events for each season. 
+
+```{r bar plot of event occurrence for each season}
+# assign months to each season category
+storm.current.season <- mutate(storm.current,
+                                  season = as.factor(plyr::mapvalues(MONTH_NAME, c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June'), c('Summer', 'Summer', 'Fall', 'Fall', 'Fall', 'Winter', 'Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer'))))
+
+# draw the barplot for each season
+season.order <- c('Spring', 'Summer', 'Fall', 'Winter')
+season.plot <- ggplot(data = storm.current.season, aes(x = season, fill = season))
+season.plot + geom_bar() + xlab("Season") + ylab("Count") + ggtitle("Event Occurrence for each Season") + theme(text = element_text(size=10), plot.title = element_text(hjust = 0.5)) + scale_x_discrete(limits = season.order, labels = season.order)
+```
+
+From the barplot above, it shows clearly that summer is the season which occurs the most events. Whereas the number of events in spring and winter are similar, and fall is the season which has the least events. 
+
+
+##### Q1c: Which state(s) have potentially more events compared to other states?  
+
+While there are 50 states and 3243 counties in US, I was also curious on which states were more prone to these natural disasters.The current dataset in use has in fact more than 50 values on its STATE column; this is because areas such as E Pacific, GULF OF MEXICO, LAKE HURON, etc. were also included. 
+
+```{r table for states / counties and number of events}
+# generate the count of events per state
+state.event.summary <- storm.current %>% 
+  group_by(STATE) %>% 
+  dplyr::summarize(n = n()) %>%
+  arrange(., desc(n))
+colnames(state.event.summary) <- c("STATE", "Count")
+knitr::kable(state.event.summary, caption = "Count of Events per State")
+```
+
+From the above table, it is noted that Texas, Minnesota, South Dakota, California and New York are the top 5 states with the most events during the current cycle. While there is a lot of information in this table, for the reader's easier view, a US map is also created as below:
+
+```{r create event USMAP}
+library(usmap)
+
+# add a state column for usmap
+state.event.map <- mutate(state.event.summary, 
+                        state = STATE)
+plot_usmap(data = state.event.map, value = 'Count', labels = FALSE) +
+  scale_fill_continuous(low = 'lightblue', high = 'red',
+                        name = 'Event Occurrence', label = scales::comma) + 
+  theme(legend.position = 'right') + 
+  theme(panel.background = element_rect(color = 'black')) + 
+  labs(title = 'Event Occurrence for each State')
+```
+
+From the above US map, it is very clear that Texas, with the largest event occurrence frequency, stands out of the other states. The east and north part of US also has larger event occurrences compared to the states on the west side (excluding california).  
+
+
+##### Q1d: For the states that occur more events than others, what are the most frequent events?
+
+Now that knowing which states have higher event occurrences, I was also curious about their corresponding top event types. The following identifies the top event types occurring in Texas, Minnesota, South Dakota, California, and New York.
+
+```{r top events for the 5 states}
+top5states <- c('TEXAS', 'MINNESOTA', 'SOUTH DAKOTA', 'CALIFORNIA', 'NEW YORK')
+
+# plot top events for the 5 states
+top5states.plot <- ggplot(data = storm.current[storm.current$STATE %in% top5states,], aes(x = fct_infreq(EVENT_TYPE), fill = STATE))
+
+top5states.plot + geom_bar() + xlab("Event Type") + ylab("Count") + facet_grid(STATE~.) + ggtitle("Most Frequent Event Type for the Top 5 Most Event Occurrence States") + theme(strip.text = element_text(size = 5), text = element_text(size=8),
+        axis.text.x = element_text(angle=45, hjust=1),  plot.title = element_text(hjust = 0.5)) 
+```
+
+From the grouped graph above, it is noted that other than California, all other 4 has a higher occurrence of thunderstorm wind and hail, which could be related to their locations (since they are on the central / east parts of US). Moreover, Texas has more droughts compared to the others, considering its geographic location is also farther to seas / oceans. A special thing about California is that it has a significant occurrence of dense fog, perhaps due to its location near Pacific ocean and its topography. 
+
+
+##### Q1e: Were there high injuries and deaths for the events?
+
+Assuming there is a positive relationship between injury / death amount and the frequency of the events, I would like to plot a violin plot for the top 5 event types identified in 1a (i.e. 'Thunderstorm Wind', 'Hail', 'High Wind', 'Drought', 'Flash Flood'.
+
+```{r inspect injuries and deaths}
+top5event <- c('Thunderstorm Wind', 'Hail', 'High Wind', 'Drought', 'Flash Flood')
+
+# aggregate injury and death data 
+storm.current.injuries <- mutate(storm.current, 
+                        INJURY_DEATH = INJURIES_DIRECT + INJURIES_INDIRECT + DEATHS_DIRECT + DEATHS_INDIRECT)
+storm.current.injuries <- filter(storm.current.injuries, EVENT_TYPE %in% top5event)
+
+storm.current.injuries.plot <- ggplot(storm.current.injuries, aes(x = EVENT_TYPE, y = INJURY_DEATH))
+storm.current.injuries.plot + geom_violin() + xlab("Event Type") + ylab("No. of Injuries and Deaths") + ggtitle("Injuries and Deaths for Top 5 Event Types")
+
+```
+
+From the above violin plot, it is noted that actually the injuries and deaths rate for the top 5 events are mostly zero. For this current cycle, drought has not led to any injuries and deaths. However, it is also noticed that there are several injuries and deaths for flash flood, with the largest number of injuries and deaths per event around 18. 
+
+
+##### Q1f: Is there a relationship between the length and the width of tornadoes?
+
+While tornadoes are very common in US, I was curious if a longer tornado always has a wider width. Understood that tornadoes may have different shapes and sizes, I decided to do an examination of the correlation between the length and the width of tornadoes. 
+
+Since the dataset uses miles for length and feet for width, I decided to transform the unit of width into miles by dividing it with 5280 to make easier interpretation and get clearer plots. Before directly drawing the linear model plot, I also decided to conduct a t-test to inspect the relationship between tornado length and width. 
+
+```{r linear model of tornado length and width}
+# add TOR_WIDTH2 to transform the unit of width into miles
+storm.current <- mutate(storm.current,
+                        TOR_WIDTH2 = TOR_WIDTH / 5280)
+
+# conduct a t-test on TOR_LENGTH and TOR_WIDTH2 first
+t.test(x = storm.current$TOR_WIDTH2, y = storm.current$TOR_LENGTH)
+
+# construct a linear model using TOR_LENGTH and TOR_WIDTH of the dataset
+torn.lmfit <-lm(TOR_LENGTH ~ TOR_WIDTH2, data = storm.current)
+summary(torn.lmfit)
+
+plot(storm.current$TOR_LENGTH ~ storm.current$TOR_WIDTH2,
+     ylab = "Tornado Length (miles)",
+     xlab = "Tornado Width (miles)",
+     main = "Tornado Length vs Tornado Width")
+abline(torn.lmfit, col = 'red')
+```
+
+From the regression statistics, it is likely that tornado width does have some impact on the tornado length as the p-value of the x variable (i.e. tornado width) is very small. However, it is also noted from the low R-squared value that the model does not fit well. Hence, by viewing at the plot and considering the very low R-squared value, I would not be able to state that there is a linear relationship between the tornado width and length. 
+
+More graphs regarding the linear model of tornado width and length are generated below:
+```{r graphical analysis of tornado linear model}
+par(mfrow = c(2, 2))
+plot(torn.lmfit)
+```
+
+It is clear that there is a large difference between the residuals and the fitted line. This further supports a poor to no linear correlation. 
+
+Seeing this poor statistics, I was curious if taking some transformation to the model could help. Below outlines the linear model of tornado length and square of tornado width.
+
+```{r linear model of tornado length and width ^ 2}
+# conduct a t-test on TOR_LENGTH and TOR_WIDTH2 first
+t.test(x = sqrt(storm.current$TOR_WIDTH2), y = storm.current$TOR_LENGTH)
+
+# construct a linear model using TOR_LENGTH and square(TOR_WIDTH) of the dataset
+ttorn.lmfit <-lm(TOR_LENGTH ~ sqrt(TOR_WIDTH2), data = storm.current)
+summary(ttorn.lmfit)
+plot(storm.current$TOR_LENGTH ~ sqrt(storm.current$TOR_WIDTH2),
+     ylab = "Tornado Length (miles)",
+     xlab = "squared Tornado Width (miles)",
+     main = "Tornado Length vs Squared Tornado Width")
+abline(ttorn.lmfit, col = 'red')
+```
+
+The above results show that by squaring the tornado width, the p-value for squared tornado width is also low, though the R-squared values are low as well and such result supports that there is poor linear correlation between tornado length and squared tornado width. Although there is a slight improvement of the model, the conclusion that they are linearly correlated still cannot be made. 
+
+More graphs regarding the linear model of squared tornado width and length are generated below:
+```{r graphical analysis of tornado transform linear model}
+par(mfrow = c(2, 2))
+plot(ttorn.lmfit)
+```
+
+The 4 residual plots also look very similar like the previous result. It shows that taking square on tornado width does not really improve the model.
+
+
+## II. Comparison of the current cycle and the past cycle
+
+##### Q2a:  Are the top 5 events that occur the most in the current cycle same as these in the past?
+
+```{r bar plot of event occurrence per type for past}
+past.event.plot <- ggplot(data = storm.past, aes(x = fct_infreq(EVENT_TYPE)))
+past.event.plot + geom_bar(fill = 'lightgreen') + xlab("Event Type") + ylab("Count") + ggtitle("Summary of Event Occurrence per Type (Past)") + theme(text = element_text(size=8),
+        axis.text.x = element_text(angle=45, hjust=1), plot.title = element_text(hjust = 0.5)) 
+
+# a closer look on the top 5 event types
+table(storm.past$EVENT_TYPE)
+```
+
+
+Compared to the current cycle, whose top 5 event types are Thunderstorm Wind, Hail, High Wind, Drought, Flash Flood, the past cycle actually has the same top 5 events as it. The only difference is just the order of these 5 event types. For the past cycle, the order was Thunderstorm Wind, Hail, Drought, High Wind, Flash Flood, where the order of Drought and High Wind has swapped in the current cycle. 
+
+Let's also do a comparison of the frequency of these 5 top events between the past cycle and the current cycle. 
+
+```{r comparison of top 5 event type occurrence}
+# bind the current dataset and past dataset into a large data frame
+total.raw <- rbind(storm.current.raw, storm.past.raw)
+total <- subset(total.raw, select = -c(EPISODE_ID, SOURCE, CATEGORY, TOR_OTHER_WFO:DATA_SOURCE))
+
+# for past cycle, cycle is 0; for current cycle, cycle is 1
+total <- mutate(total.raw, cycle = as.factor(plyr::mapvalues(YEAR, c(2011, 2012, 2021, 2022), c('Past Cycle', 'Past Cycle', 'Current Cycle', 'Current Cycle'))))
+
+# top 5 event comparison
+top5event <- c('Thunderstorm Wind', 'Hail', 'High Wind', 'Drought', 'Flash Flood')
+
+cp.top5event.plot <- ggplot(data = total[total$EVENT_TYPE %in% top5event,], aes(x = EVENT_TYPE, fill = forcats::fct_rev(cycle)))
+cp.top5event.plot + geom_bar(position="dodge") + xlab("Event Type") + ylab("Count") + ggtitle("Comparison of Top 5 Event Type Between Past and Current") + theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=0), plot.title = element_text(hjust = 0.5)) + guides(fill = guide_legend(title = "Cycle"))
+```
+
+From the above comparison plot, it is noted that although the top 5 events remain the same for the current cycle compared to the past cycle, the frequency distribution of the events has changed. In short, there were more thunderstorm winds, high winds, and flash floods in this cycle, while the past cycle occurred more droughts and hails. Hail has largely decreased in the current cycle, which could be related to climate change. 
+
+
+##### Q2b: Are there any differences of the time fluctuation of event occurrence?  
+
+After comparing the event type difference, I would also like to look at whether the past cycle and the current cycle has similar time patterns. From 1b, the result shows that in the current cycle, June 2022 has occurred the most events, and November 2021 has occurred the least events. To do a comparison, a barplot is illustrated below to examine the occurrence of events through out the past cycle.
+
+```{r bar plot of event occurrence throughout the past cycle}
+# plot of event occurrence throughout the past cycle
+month.order <- c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June')
+month.labels <- c('Jul 2011', 'Aug 2011', ' Sep 2011', 'Oct 2011', 'Nov 2011', 'Dec 2011', 'Jan 2012', 'Feb 2012', 'Mar 2012', 'Apr 2012', 'May 2012', 'Jun 2012')
+month.plot <- ggplot(data = storm.past, aes(x = MONTH_NAME))
+month.plot + geom_bar(fill = 'burlywood') + xlab("Month") + ylab("Count") + ggtitle("Event Occurrence Throughout the Past Cycle") + theme(text = element_text(size=10), axis.text.x = element_text(angle=45, hjust=1), plot.title = element_text(hjust = 0.5)) + scale_x_discrete(limits = month.order, labels = month.labels)
+```
+
+Compared to 1b, it is noted that the barplot for the past cycle actually has a similar pattern like the current cycle. It is also more likely to have events during summer. For the past cycle, July 2011 has occurred the most events, and October 2011 has occurred the least events.
+
+Similar as above, a comparison of event occurrence throughout the year for the past and current cycle is provided below. 
+
+```{r comparison of event occurrence throughout the past and current cycle}
+# use the bound total dataset from above
+# for past cycle, cycle is 0; for current cycle, cycle is 1
+
+# event occurrence comparison
+month.order <- c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June')
+
+cp.month.plot <- ggplot(data = total, aes(x = MONTH_NAME, fill = forcats::fct_rev(cycle)))
+cp.month.plot + geom_bar(position="dodge") + xlab("Month") + ylab("Count") + ggtitle("Comparison of Event Occurrence Throughout the Year Between Past and Current") + theme(text = element_text(size=10), axis.text.x = element_text(angle=45, hjust=1), plot.title = element_text(hjust = 0.5)) + scale_x_discrete(limits = month.order, labels = month.order) + guides(fill = guide_legend(title = "Cycle"))
+```
+
+From the above figure, it is noted that there are no significant differences of event occurrence between the current cycle and the past cycle. However, it is noted that the past cycle has a higher maximum occurrence (i.e. in July) than that of the current cycle. In contrast, the current cycle has a smaller minimum occurrence (i.e. in November) compared to that of the past cycle. The largest difference of the months occurred in December, where the current cycle has around twice occurrences than the past cycle. In addition, the number of months having a higher occurrence than the other cycle is actually quite equal, with the current cycle having 7 months more occurrence than the past one (i.e. October, December, January, February, April, May, June), and the past cycle having 5 months more occurrence than the current one (i.e. July, August, September, November, March). 
+
+To take a closer look, below is a barplot for comparison of the occurrence of events for each season in the past cycle. 
+
+```{r bar plot of event occurrence for each season in the past cycle}
+# assign months to each season category
+storm.past.season <- mutate(storm.past,
+                                  season = as.factor(plyr::mapvalues(MONTH_NAME, c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June'), c('Summer', 'Summer', 'Fall', 'Fall', 'Fall', 'Winter', 'Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer'))))
+
+# draw the barplot for each season
+season.order <- c('Spring', 'Summer', 'Fall', 'Winter')
+season.plot <- ggplot(data = storm.past.season, aes(x = season, fill = season))
+season.plot + geom_bar() + xlab("Season") + ylab("Count") + ggtitle("Event Occurrence for each Season of the Past Cycle") + theme(text = element_text(size=10), plot.title = element_text(hjust = 0.5)) + guides(fill = guide_legend(title = "Season") + scale_x_discrete(limits = season.order, labels = season.order)) 
+                                  
+```
+
+Same as the current cycle, it is noted that summer is the season which occurs the most events and fall is the season with the least events in the past cycle as well. A slight difference would be the past cycle still has a higher occurrence in spring than fall and winter.
+
+A comparison plot of event occurrence for each season is illustrated below.
+
+```{r comparison of event occurrence for each season of the past and current cycle}
+# bind the current season dataset and past season dataset into a large data frame
+total.season.raw <- rbind(storm.current.season, storm.past.season)
+
+# for past cycle, cycle is 0; for current cycle, cycle is 1
+total.season <- mutate(total.season.raw, 
+                       season = as.factor(plyr::mapvalues(MONTH_NAME, c('July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June'), c('Summer', 'Summer', 'Fall', 'Fall', 'Fall', 'Winter', 'Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer'))), 
+                       cycle = as.factor(plyr::mapvalues(YEAR, c(2011, 2012, 2021, 2022), c('Past Cycle', 'Past Cycle', 'Current Cycle', 'Current Cycle'))))
+
+# seasonal event occurrence comparison
+season.order <- c('Spring', 'Summer', 'Fall', 'Winter')
+cp.season.plot <- ggplot(data = total.season, aes(x = season, fill = forcats::fct_rev(cycle)))
+cp.season.plot + geom_bar(position="dodge") + xlab("Season") + ylab("Count") + ggtitle("Comparison of Event Occurrence for each Season") + theme(text = element_text(size=10), plot.title = element_text(hjust = 0.5)) + scale_x_discrete(limits = season.order, labels = season.order) + guides(fill = guide_legend(title = "Cycle"))
+```
+
+From the above figure, it is noted that both cycles have similar pattern, with summer as their peak for events. Compared to the past, the current cycle has less events in Summer and Fall, but more events in Spring and Winter. 
+ 
+
+##### Q2c: Has the wind speed changed throughout the years?
+
+For high winds, marine high winds, marine strong winds, marine thunderstorm winds, strong winds, and thunderstorm winds, the magnitude field measures the wind speeds (in knots). To understand if wind speed has increased or decreased throughout the years, below outlines 2 box plots of wind speed for comparison. 
+
+```{r wind speed comparison}
+wind.types <- c("High Wind", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Strong Wind", "Thunderstorm Wind")
+storm.current.wind <- filter(storm.current, EVENT_TYPE %in% wind.types)
+storm.past.wind <- filter(storm.past, EVENT_TYPE %in% wind.types)
+
+par(cex.main = 0.8, mfrow = c(1, 2))
+# boxplot for wind speed of past and current cycle
+boxplot(storm.past.wind$MAGNITUDE, ylim = c(20, 150), main = "Boxplot for Wind Speed\n of Past Cycle")
+boxplot(storm.current.wind$MAGNITUDE, ylim = c(20, 150), main = "Boxplot for Wind Speed\n of Current Cycle")
+
+```
+
+From the box plots above, it is noted that both box plots generate similar minimum value, 1st quartile, median, 3rd quartile, and maximum value, the current cycle has more outliers. The current cycle has more records with wind speed larger than 100, and the box plot for past cycle shows that in the past cycle, wind speed varied less and was more concentrated. 
+
+While the outliers vary a lot over range, below outlines a closer look for the box plot data points.
+
+```{r wind speed comparison - close up}
+par(cex.main = 0.8, mfrow = c(1, 2))
+# boxplot for wind speed of past and current cycle - close up
+boxplot(storm.past.wind$MAGNITUDE, ylim = c(40, 67), main = "Boxplot for Wind Speed\n of Past Cycle - Close Up")
+boxplot(storm.current.wind$MAGNITUDE, ylim = c(40, 67), main = "Boxplot for Wind Speed\n of Current Cycle - Close Up")
+```
+
+By taking a closer look, it is noted that the minimum value, 1st quartile, median, 3rd quartile, and maximum value data points are quite close to each other in both cycles. Both of them have a median around 52. This implicates that although the wind speed for the current cycle is more scattered out, the distribution of wind speed is still similar to the past cycle. 
+
+
+##### Q2d: Has the hail size changed throughout the years?
+
+For hails and marine hails, the magnitude field measures the hail size (in inches to the hundredth). To understand if the hail size has increased or decreased throughout the years, below outlines a comparison of the hail size distributions. 
+
+```{r hail size basic statistics}
+# define a function for calculation of basic statistics
+basic.statistics <- function(x) {
+  c(minimum = min(x),
+    median = median(x),
+    mean = mean(x),
+    maximum = max(x),
+    stddev = sd(x))
+}
+
+hail.types <- c("Hail", "Marine Hail")
+storm.past.hail <- filter(storm.past, EVENT_TYPE %in% hail.types)
+storm.current.hail <- filter(storm.current, EVENT_TYPE %in% hail.types)
+
+# get hail statistics
+hail.past.stats <- basic.statistics(storm.past.hail$MAGNITUDE) %>% round(3)
+hail.current.stats <- basic.statistics(storm.current.hail$MAGNITUDE) %>% round(3)
+
+# create a data frame for easier examination
+data.frame(hail.past.stats, hail.current.stats)
+```
+
+From the above data frame, it is noted that there is a slight increase in hail size in the current cycle. Although both cycles have the same minimum and median size, since the maximum size increased in the current cycle, the mean also increased by around 7 percent (i.e. (1.256 - 1.173) / 1.173 = 0.07). There is also a slight increase in the standard deviation. 
+
+
+
+## III. Prediction using long term time series data
+
+##### Q3a: Can we predict the tornado width with tornado length for the next 20 tornadoes using previous data?
+
+Since I consolidated datasets from January 2010 till June 2022, I would like to predict the tornado width using tornado length for the future 20 tornadoes. Before I start to do modelling, I would like to check how many data points do I have to make sure there is sufficient data for training.  
+
+```{r preparation for classification}
+# check number of tornado length / width values in the consolidated data set
+sum(!is.na(storm.consolidated$TOR_LENGTH))
+sum(!is.na(storm.consolidated$TOR_WIDTH))
+```
+
+From the above result, it seems that the data is quite sufficient, and a training model can be built. By inspection, it is noted that the TOR_LENGTH and TOR_WIDTH values are recorded together, therefore, if one of them has value, the other one would also have value. 
+
+```{r predictions for the future 20 tornado width - using lm}
+# load caret 
+library(caret)
+
+# drop the na values first, only need to do this one either TOR_LENGTH or TOR_WIDTH
+torn.train <- storm.consolidated %>% drop_na(TOR_LENGTH)
+
+# define train control parameters
+ctrl <- trainControl(method = 'repeatedcv',
+                     repeats = 5)
+
+# define parameters to be used for linear model
+torn.lmtrain <- train(TOR_LENGTH ~ TOR_WIDTH,
+                           data = torn.train,
+                           method = "lm",
+                           trControl = ctrl)
+torn.lmtrain
+torn.preds <- predict(torn.lmtrain)
+head(torn.preds, 20) %>% round(2)
+```
+
+By leveraging caret library, 20 tornado widths has been predicted based on the relationship with tornado lengths from the consolidated dataset. However, it is noted that the R-squared value is rather small and RMSE / MAE results do not look good. 
+
+Another training model constructed with k-Nearest Neighbors is illustrated below.
+
+```{r predictions for the future 20 tornado width - using knn}
+# define train control parameters
+ctrl <- trainControl(method = 'repeatedcv',
+                     repeats = 5)
+
+# define parameters to be used for linear model
+torn.knnfit <- train(TOR_WIDTH ~ TOR_LENGTH ,
+                           data = torn.train,
+                           method = "knn",
+                           trControl = ctrl)
+torn.knnfit
+torn.preds <- predict(torn.knnfit)
+head(torn.preds, 20) %>% round(2)
+```
+
+From the above result, it is noted that KNN also did not do a good job, though it could be because of the poor explainability of tornado width. The model also had poor R-squared, RMSE, and MAE values. 
+
